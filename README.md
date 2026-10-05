@@ -3,7 +3,7 @@
 Eksperimen perbandingan dua pendekatan AI untuk **sentiment analysis ulasan pelanggan e-commerce**:
 
 1. **Model Klasik (Scikit-learn)** — TF-IDF + Logistic Regression, dilatih sendiri.
-2. **LLM API (Gemini)** — klasifikasi via prompting (zero-shot), tanpa training.
+2. **LLM API (Ollama Cloud, model `deepseek-v4.1-flash`)** — klasifikasi via prompting (zero-shot, batched), tanpa training.
 
 Keduanya dievaluasi pada **test set yang sama** dengan metrik Accuracy, Precision, Recall, F1-Score + confusion matrix, lalu dibandingkan untuk menyusun rekomendasi technical approach.
 
@@ -22,7 +22,7 @@ Tim produk e-commerce ingin fitur otomatis yang mengklasifikasikan sentimen ulas
 - Klasifikasi biner; ulasan diasumsikan polar (tanpa kelas netral).
 - Test set identik untuk kedua pendekatan (split `random_state=42`, stratified).
 - Preprocessing klasik dibuat sesederhana mungkin (TF-IDF murni, tanpa stemming/stopword bahasa Indonesia) sebagai baseline.
-- Penggunaan Gemini melalui `google-genai` SDK, key via environment variable `GEMINI_API_KEY`.
+- Penggunaan LLM via API (OpenAI-compatible SDK): awalnya Gemini (`google-genai`), karena kuota harian tier gratis yang ketat eksperimen final memakai **Ollama Cloud** (`deepseek-v4.1-flash`, model setara kelas Gemini flash).
 - Biaya API belum dihitung dari tagihan riil, hanya estimasi volume token.
 
 ## 2. Dataset
@@ -35,21 +35,24 @@ Tim produk e-commerce ingin fitur otomatis yang mengklasifikasikan sentimen ulas
 
 1. **Split**: 80/20 stratified (train 160, test 40), `random_state=42`. Test set yang sama dipakai untuk kedua pendekatan.
 2. **Model klasik**: `TfidfVectorizer` → `LogisticRegression(max_iter=1000)`, prediksi pada test set.
-3. **LLM (Gemini)**: prompt zero-shot per ulasan (`gemini-2.0-flash`, `temperature=0.2`, `max_output_tokens=8`), output diparse ke `positif`/`negatif` (jawaban di luar dua label dicatat `invalid`).
+3. **LLM (Ollama Cloud)**: prompt zero-shot **batched 5 ulasan per call** (`deepseek-v4.1-flash`, `temperature=0.2`), meminta JSON array label; output di-parse & dinormalisasi (label di luar `positif`/`negatif` dicatat `invalid`). Prediksi di-cache ke `data/llm_predictions.csv` (cache) agar re-run tidak memanggil ulang API.
 4. **Evaluasi**: Accuracy, Precision, Recall, F1 (positif = kelas positif), confusion matrix, tabel perbandingan.
 
-### Hasil (jalankan notebook dengan `GEMINI_API_KEY` untuk melengkapi kolom LLM)
+### Hasil
 
-Model klasik pada test set: **Accuracy 1.00, Precision 1.00, Recall 1.00, F1 1.00** (CM: 18 TN, 0 FP, 0 FN, 22 TP).
+Model klasik: **Accuracy 1.00, Precision 1.00, Recall 1.00, F1 1.00** (CM: 18 TN, 0 FP, 0 FN, 22 TP).
+LLM (Ollama `deepseek-v4.1-flash`): **Accuracy 1.00, Precision 1.00, Recall 1.00, F1 1.00** (CM identik: 18/0/0/22). 40 prediksi selesai dalam 4.1 detik (8 batched calls).
 
 > ⚠️ **Peringatan interpretasi**: dataset ini hanya memuat 40 teks unik dari 200 baris (banyak duplikat) sehingga test set mengandung baris identik dengan train (data leakage dari sisi data, bukan proses). Metrik 1.0 mencerminkan kemudahan task + duplikasi, bukan performa produksi. Validasi silang pada 40 teks unik saja menghasilkan rata-rata akurasi ~0.7-0.85 tergantung fold — lebih realistis.
 
 ## 4. Tabel Perbandingan
 
-| Pendekatan | Accuracy | Precision (positif) | Recall (positif) | F1 (positif) |
+| Pendekatan | Accuracy | Precision (neg/pos) | Recall (neg/pos) | F1 (neg/pos) |
 |---|---|---|---|---|
-| Model Klasik (TF-IDF + LogReg) | 1.00 | 1.00 | 1.00 | 1.00 |
-| LLM API (Gemini) | _isi setelah run dengan API key_ | | | |
+| Model Klasik (TF-IDF + LogReg) | 1.00 | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
+| LLM API (Ollama: deepseek-v4.1-flash) | 1.00 | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
+
+Confusion matrix kedua pendekatan identik (18 TN, 0 FP, 0 FN, 22 TP) — terlihat pada `documentation/model_comparison_summary.png`.
 
 ## 5. Analisis Trade-off dan Limitation
 
@@ -93,8 +96,12 @@ python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# 2) set API key Gemini (untuk bagian LLM; bagian klasik jalan tanpa ini)
-export GEMINI_API_KEY='<key kamu>'    # Windows CMD: set GEMINI_API_KEY=... / PowerShell: $env:GEMINI_API_KEY="..."
+# 2) set API key LLM (untuk bagian LLM: Ollama Cloud; bagian klasik jalan tanpa ini)
+export OLLAMA_API_KEY='<key kamu>'   # Windows CMD: set OLLAMA_API_KEY=... / PowerShell: $env:OLLAMA_API_KEY="..."
+
+# Catatan: bagian LLM juga pernah dijalankan dengan Gemini (gemini-2.0/3.x); tier gratisnya
+# dibatasi 20 request/hari/per model sehingga eksperimen dipindah ke Ollama Cloud yang tidak
+# punya batas harian ketat. Prompt dan pengukurannya identik.
 
 # 3) jalankan notebook
 cd notebook
